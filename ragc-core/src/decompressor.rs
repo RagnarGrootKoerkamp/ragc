@@ -403,18 +403,18 @@ impl Decompressor {
     }
 
     /// Extract a specific contig from a sample
-    pub fn get_contig(&mut self, sample_name: &str, contig_name: &str) -> Result<Contig> {
+    pub fn get_contig(&self, sample_name: &str, contig_name: &str) -> Result<Contig> {
         // Load ALL contig batches if sample not found (samples may be in any batch)
         if self
             .collection
             .get_no_contigs(sample_name)
             .is_none_or(|count| count == 0)
         {
-            let num_batches = self.collection.get_no_contig_batches(&self.archive)?;
-            for batch_id in 0..num_batches {
-                self.collection
-                    .load_contig_batch(&mut self.archive, batch_id)?;
-            }
+            panic!();
+            // let num_batches = self.collection.get_no_contig_batches(&self.archive)?;
+            // for batch_id in 0..num_batches {
+            //     self.collection.load_contig_batch(&self.archive, batch_id)?;
+            // }
         }
 
         // Get contig segment descriptors
@@ -472,9 +472,9 @@ impl Decompressor {
 
     /// Public: get the reference segment for a group (loads and caches if needed)
     pub fn get_reference_segment(&mut self, group_id: u32) -> Result<Contig> {
-        if let Some(ref_data) = self.segment_cache.get(&group_id) {
-            return Ok(ref_data.clone());
-        }
+        // if let Some(ref_data) = self.segment_cache.get(&group_id) {
+        //     return Ok(ref_data.clone());
+        // }
 
         let archive_version = ragc_common::AGC_FILE_MAJOR * 1000 + ragc_common::AGC_FILE_MINOR;
         let ref_stream_name = stream_ref_name(archive_version, group_id);
@@ -501,26 +501,27 @@ impl Decompressor {
         // decompress_segment_with_marker returns bytes in the stored format for references
         // Our helper already returns decompressed raw bytes for references
         let reference = decompressed;
-        self.segment_cache.insert(group_id, reference.clone());
+        // self.segment_cache.insert(group_id, reference.clone());
         Ok(reference)
     }
 
     /// Extract all contigs from a sample
-    pub fn get_sample(&mut self, sample_name: &str) -> Result<Vec<(String, Contig)>> {
+    pub fn get_sample(&self, sample_name: &str) -> Result<Vec<(String, Contig)>> {
         // Load ALL contig batches if needed (FIX: was only loading batch 0)
         if self
             .collection
             .get_no_contigs(sample_name)
             .is_none_or(|count| count == 0)
         {
-            // Get number of contig batches from the archive
-            let num_batches = self.collection.get_no_contig_batches(&self.archive)?;
+            panic!();
+            // // Get number of contig batches from the archive
+            // let num_batches = self.collection.get_no_contig_batches(&self.archive)?;
 
-            // Load ALL contig batches, not just batch 0
-            for batch_id in 0..num_batches {
-                self.collection
-                    .load_contig_batch(&mut self.archive, batch_id)?;
-            }
+            // // Load ALL contig batches, not just batch 0
+            // for batch_id in 0..num_batches {
+            //     self.collection
+            //         .load_contig_batch(&mut self.archive, batch_id)?;
+            // }
         }
 
         let sample_desc = self
@@ -586,7 +587,7 @@ impl Decompressor {
     }
 
     /// Reconstruct a contig from its segment descriptors
-    fn reconstruct_contig(&mut self, segments: &[SegmentDesc]) -> Result<Contig> {
+    fn reconstruct_contig(&self, segments: &[SegmentDesc]) -> Result<Contig> {
         let mut contig = Contig::new();
         #[cfg(feature = "verbose_debug")]
         let should_debug = crate::env_cache::debug_reconstruct() && segments.len() > 1;
@@ -705,7 +706,7 @@ impl Decompressor {
     /// Two-stream architecture:
     /// - Raw groups (0-15): All segments in delta stream
     /// - LZ groups (16+): Reference in ref stream (part 0), LZ-encoded segments in delta stream
-    fn get_segment(&mut self, desc: &SegmentDesc) -> Result<Contig> {
+    fn get_segment(&self, desc: &SegmentDesc) -> Result<Contig> {
         const PACK_CARDINALITY: usize = 50; // C++ default
         const NO_RAW_GROUPS: u32 = 16;
 
@@ -723,7 +724,7 @@ impl Decompressor {
             // LZ group: two-stream architecture
 
             // First, ensure we have the reference loaded
-            if !self.segment_cache.contains_key(&desc.group_id) {
+            let reference = {
                 // Load reference from ref stream (part 0)
                 let ref_stream_name = stream_ref_name(archive_version, desc.group_id);
                 let ref_stream_id = self
@@ -792,12 +793,15 @@ impl Decompressor {
                 }
 
                 // Cache the reference
-                self.segment_cache.insert(desc.group_id, decompressed_ref);
-            }
+                // eprintln!("INSERT ENTRY {} (SKIP)", desc.group_id);
+                // self.segment_cache
+                //     .insert(desc.group_id, decompressed_ref.clone());
+                decompressed_ref
+            };
 
             // If this IS the reference (in_group_id == 0), return it directly
             if desc.in_group_id == 0 {
-                return Ok(self.segment_cache.get(&desc.group_id).unwrap().clone());
+                return Ok(reference);
             }
 
             // Otherwise, load LZ-encoded segment from delta stream
@@ -855,13 +859,13 @@ impl Decompressor {
             }
 
             // Decode using reference
-            let reference = self
-                .segment_cache
-                .get(&desc.group_id)
-                .ok_or_else(|| anyhow!("Reference not loaded for group {}", desc.group_id))?;
+            // let reference = self
+            //     .segment_cache
+            //     .get(&desc.group_id)
+            //     .ok_or_else(|| anyhow!("Reference not loaded for group {}", desc.group_id))?;
 
             let mut lz_diff = LZDiff::new(self.min_match_len);
-            lz_diff.prepare(reference);
+            lz_diff.prepare(&reference);
 
             // Handle empty encoding (segment equals reference)
             let decoded = if lz_encoded.is_empty() {
