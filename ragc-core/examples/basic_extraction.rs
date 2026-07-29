@@ -17,7 +17,7 @@ fn main() -> Result<()> {
 
     println!("Opening archive: {archive_path}");
 
-    let mut decompressor = Decompressor::open(&archive_path, DecompressorConfig::default())?;
+    let decompressor = Decompressor::open(&archive_path, DecompressorConfig::default())?;
 
     // List all samples in the archive
     let samples = decompressor.list_samples();

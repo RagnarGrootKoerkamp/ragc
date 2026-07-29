@@ -93,7 +93,7 @@ fn main() -> Result<()> {
 /// Worker function that processes samples assigned to this thread
 fn extract_worker(
     thread_id: usize,
-    mut decompressor: Decompressor,
+    decompressor: Decompressor,
     samples: Arc<Vec<String>>,
     num_threads: usize,
 ) -> Result<(usize, u64)> {

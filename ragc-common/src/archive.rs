@@ -5,7 +5,7 @@ use crate::varint::{read_varint, write_varint};
 use anyhow::{Context, Result};
 use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
-use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
+use std::io::{BufWriter, Read, Write};
 use std::path::Path;
 
 /// A part within a stream (offset and size in file)
@@ -49,7 +49,8 @@ impl Stream {
 pub struct Archive {
     input_mode: bool,
     file: Option<File>,
-    reader: Option<BufReader<File>>,
+    data: Option<Vec<u8>>,
+    // readers: Option<HashMap<ThreadId, File>>,
     writer: Option<BufWriter<File>>,
     f_offset: u64,
     streams: Vec<Stream>,
@@ -66,7 +67,7 @@ impl Archive {
         Archive {
             input_mode: true,
             file: None,
-            reader: None,
+            data: None,
             writer: None,
             f_offset: 0,
             streams: Vec::new(),
@@ -80,7 +81,7 @@ impl Archive {
         Archive {
             input_mode: false,
             file: None,
-            reader: None,
+            data: None,
             writer: None,
             f_offset: 0,
             streams: Vec::new(),
@@ -92,9 +93,11 @@ impl Archive {
     /// Open an archive file
     pub fn open<P: AsRef<Path>>(&mut self, path: P) -> Result<()> {
         if self.input_mode {
-            let file = File::open(path).context("Failed to open archive for reading")?;
-            self.reader = Some(BufReader::new(file.try_clone()?));
+            let mut file = File::open(path).context("Failed to open archive for reading")?;
+            let mut data = vec![];
+            file.read_to_end(&mut data)?;
             self.file = Some(file);
+            self.data = Some(data);
             self.deserialize()?;
         } else {
             let file = File::create(path).context("Failed to create archive for writing")?;
@@ -116,9 +119,9 @@ impl Archive {
             self.serialize()?;
         }
 
-        self.reader = None;
         self.writer = None;
         self.file = None;
+        self.data = None;
         Ok(())
     }
 
@@ -281,7 +284,7 @@ impl Archive {
     }
 
     /// Get a specific part by ID from a stream (random access)
-    pub fn get_part_by_id(&mut self, stream_id: usize, part_id: usize) -> Result<(Vec<u8>, u64)> {
+    pub fn get_part_by_id(&self, stream_id: usize, part_id: usize) -> Result<(Vec<u8>, u64)> {
         if stream_id >= self.streams.len() {
             anyhow::bail!("Invalid stream ID: {stream_id}");
         }
@@ -297,21 +300,17 @@ impl Archive {
     }
 
     /// Read part data from file
-    fn read_part_data(&mut self, part: &Part) -> Result<Option<(Vec<u8>, u64)>> {
+    fn read_part_data(&self, part: &Part) -> Result<Option<(Vec<u8>, u64)>> {
         if part.size == 0 {
             return Ok(Some((Vec::new(), 0)));
         }
 
-        let reader = self
-            .reader
-            .as_mut()
-            .context("Archive not open for reading")?;
-
-        // Seek to part offset
-        reader.seek(SeekFrom::Start(part.offset))?;
+        let data = self.data.as_ref().context("Archive not open for reading")?;
+        let data = &data[part.offset as usize..];
+        let mut reader = std::io::Cursor::new(data);
 
         // Read metadata
-        let (metadata, _) = read_varint(reader)?;
+        let (metadata, _) = read_varint(&mut reader)?;
 
         // Read data (part.size is the data size, not including metadata)
         let mut data = vec![0u8; part.size as usize];
@@ -367,23 +366,16 @@ impl Archive {
 
     /// Deserialize footer from file (read mode)
     fn deserialize(&mut self) -> Result<()> {
-        let file = self.file.as_mut().context("Archive not open")?;
+        let data = self.data.as_mut().context("Archive not open")?;
 
         // Get file size
-        let file_size = file.metadata()?.len();
+        let file_size = data.len();
 
         // Read footer size (last 8 bytes)
-        file.seek(SeekFrom::End(-8))?;
-        let mut footer_size_bytes = [0u8; 8];
-        file.read_exact(&mut footer_size_bytes)?;
-        let footer_size = u64::from_le_bytes(footer_size_bytes);
-
-        // Seek to start of footer
-        file.seek(SeekFrom::Start(file_size - 8 - footer_size))?;
+        let footer_size = u64::from_le_bytes(*data[data.len() - 8..].as_array().unwrap()) as usize;
 
         // Read footer into buffer
-        let mut footer = vec![0u8; footer_size as usize];
-        file.read_exact(&mut footer)?;
+        let footer = &data[file_size - 8 - footer_size..file_size - 8];
 
         // Parse footer
         let mut cursor = std::io::Cursor::new(&footer);
@@ -428,12 +420,6 @@ impl Archive {
 
             self.streams.push(stream);
             self.stream_map.insert(stream_name, i as usize);
-        }
-
-        // Seek back to beginning for reading parts
-        file.seek(SeekFrom::Start(0))?;
-        if let Some(ref mut reader) = self.reader {
-            reader.seek(SeekFrom::Start(0))?;
         }
 
         Ok(())
