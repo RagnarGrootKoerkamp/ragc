@@ -865,7 +865,7 @@ impl Decompressor {
             //     .ok_or_else(|| anyhow!("Reference not loaded for group {}", desc.group_id))?;
 
             let mut lz_diff = LZDiff::new(self.min_match_len);
-            lz_diff.prepare(&reference);
+            lz_diff.prepare_decode(&reference);
 
             // Handle empty encoding (segment equals reference)
             let decoded = if lz_encoded.is_empty() {

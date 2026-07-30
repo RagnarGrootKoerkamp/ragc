@@ -96,6 +96,12 @@ impl LZDiff {
         }
     }
 
+    /// Prepare the decoder with a reference sequence, which skips the hash table
+    pub fn prepare_decode(&mut self, reference: &Contig) {
+        self.reference = reference.clone();
+        self.reference_len = reference.len(); // Store original length before padding
+    }
+
     /// Build linear-probing hash table (exactly like C++ CLZDiffBase::make_index32)
     fn build_index_lp(&mut self) {
         // Count valid k-mer positions as in C++ prepare_index (sparse mode)
